@@ -7,13 +7,11 @@ from langchain_community.document_loaders import PyMuPDFLoader
 from langchain_community.embeddings import FastEmbedEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from src.config import (
-    CHUNK_OVERLAP,
-    CHUNK_SIZE,
-    EMBEDDING_MODEL,
-    PDF_PATH,
-    VECTOR_DB_DIR,
-)
+CHUNK_SIZE = 800
+CHUNK_OVERLAP = 150
+PDF_PATH = "edital.pdf"
+VECTOR_DB_DIR = "./chroma_db"
+EMBEDDING_MODEL = "sentence-transformers/paraphrase-multilingual-mpnet-base-v2"
 
 logger = logging.getLogger(__name__)
 

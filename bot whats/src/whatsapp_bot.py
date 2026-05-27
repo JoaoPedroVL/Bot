@@ -15,6 +15,29 @@ logger = logging.getLogger(__name__)
 
 _ULTIMO_ERRO: str | None = None
 
+
+def _quebrar_texto(texto: str, max_len: int = 500) -> list[str]:
+    if len(texto) <= max_len:
+        return [texto]
+
+    partes = []
+    while texto:
+        if len(texto) <= max_len:
+            partes.append(texto.strip())
+            break
+
+        corte = texto.rfind(". ", 0, max_len)
+        if corte == -1 or corte < max_len // 2:
+            corte = texto.rfind("\n", 0, max_len)
+        if corte == -1 or corte < max_len // 2:
+            corte = texto.rfind(" ", 0, max_len)
+        if corte == -1 or corte < max_len // 2:
+            corte = max_len
+
+        partes.append(texto[:corte + 1].strip())
+        texto = texto[corte + 1:]
+    return partes
+
 _PALAVRAS_SAUDACAO = {
     "oi", "ola", "olá", "oie", "oii", "ooi", "hey", "bom", "boa",
     "dia", "tarde", "noite", "blz", "beleza", "td", "bem", "tudo",
@@ -45,43 +68,46 @@ class WhatsAppBot:
         global _ULTIMO_ERRO
         url = f"{WHATSAPP_API_BASE}/{WHATSAPP_PHONE_NUMBER_ID}/messages"
 
-        logger.info(
-            "Enviando mensagem para %s via %s",
-            to, url,
-        )
+        partes = _quebrar_texto(text, 500)
 
-        headers = {
-            "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": "text",
-            "text": {"body": text},
-        }
+        for parte in partes:
+            logger.info("Enviando mensagem para %s via %s", to, url)
 
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            if resp.status_code != 200:
-                _ULTIMO_ERRO = f"{resp.status_code}: {resp.text}"
-                logger.error(
-                    "Erro ao enviar mensagem para %s: %s %s",
-                    to, resp.status_code, resp.text,
-                )
-            else:
-                logger.info("Mensagem enviada com sucesso para %s", to)
-                _ULTIMO_ERRO = None
+            headers = {
+                "Authorization": f"Bearer {WHATSAPP_ACCESS_TOKEN}",
+                "Content-Type": "application/json",
+            }
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": to,
+                "type": "text",
+                "text": {"body": parte},
+            }
+
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(url, json=payload, headers=headers)
+                if resp.status_code != 200:
+                    _ULTIMO_ERRO = f"{resp.status_code}: {resp.text}"
+                    logger.error(
+                        "Erro ao enviar mensagem para %s: %s %s",
+                        to, resp.status_code, resp.text,
+                    )
+                else:
+                    logger.info("Mensagem enviada com sucesso para %s", to)
+                    _ULTIMO_ERRO = None
 
     async def handle_incoming(self, from_number: str, user_text: str) -> None:
         if from_number not in self._historico:
             self._historico[from_number] = []
 
         if _eh_saudacao(user_text):
-            await self.send_message(
-                from_number,
-                "Ola! Pergunte algo sobre o edital que eu respondo!",
-            )
+            respostas = [
+                "Ola! Me pergunte algo sobre o edital.",
+                "Fala ai! Pode perguntar sobre o edital.",
+                "Oi! O que voce quer saber sobre o edital?",
+            ]
+            import random
+            await self.send_message(from_number, random.choice(respostas))
             return
 
         historico_recente = self._historico[from_number][-2:]

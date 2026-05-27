@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
+import base64
 import logging
 import sys
 
 from fastapi import FastAPI, Request, HTTPException
+import httpx
 import uvicorn
 
 from src.config import (
     WHATSAPP_ACCESS_TOKEN,
+    WHATSAPP_API_BASE,
     WHATSAPP_PHONE_NUMBER_ID,
-    WHATSAPP_VERIFY_TOKEN,
     WEBHOOK_HOST,
     WEBHOOK_PORT,
 )
@@ -22,13 +24,12 @@ logger = logging.getLogger(__name__)
 
 WEBHOOK_VERIFY_TOKEN = "meu_token_secreto_123"
 
-app = FastAPI(title="EditalBot WhatsApp")
+app = FastAPI(title="EditalBot Gemini WhatsApp")
 bot = WhatsAppBot()
 
 
 @app.get("/health")
 async def health():
-    from src.config import WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_API_BASE
     return {
         "status": "ok",
         "phone_number_id": WHATSAPP_PHONE_NUMBER_ID,
@@ -42,11 +43,9 @@ async def health():
 async def verify_webhook(request: Request):
     params = dict(request.query_params)
     logger.info("Params recebidos: %s", params)
-
     hub_mode = params.get("hub.mode") or params.get("hub_mode")
     hub_token = params.get("hub.verify_token") or params.get("hub_verify_token")
     hub_challenge = params.get("hub.challenge") or params.get("hub_challenge")
-
     if hub_mode == "subscribe" and hub_token == WEBHOOK_VERIFY_TOKEN and hub_challenge:
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(hub_challenge, status_code=200)
@@ -62,28 +61,36 @@ async def webhook(request: Request):
         entry = body["entry"][0]
         changes = entry["changes"][0]
         value = changes["value"]
-        logger.info("Value: %s", value)
 
         if "messages" not in value:
-            logger.info("Sem mensagens, apenas status update")
             return {"status": "ok"}
 
         for msg in value["messages"]:
             msg_type = msg.get("type")
-            logger.info("Tipo da mensagem: %s", msg_type)
+            from_number = msg["from"]
+            logger.info("Tipo: %s de %s", msg_type, from_number)
 
             if msg_type == "text":
-                from_number = msg["from"]
-                text = msg["text"]["body"].strip()
-                logger.info("Mensagem de %s: %s", from_number, text)
-                await bot.handle_incoming(from_number, text)
+                texto = msg["text"]["body"].strip()
+                await bot.handle_incoming(from_number, texto)
+
+            elif msg_type == "image":
+                texto_caption = (msg.get("image", {}).get("caption") or "").strip()
+                media_id = msg["image"]["id"]
+                logger.info("Imagem recebida: %s | caption: %s", media_id, texto_caption)
+                imagem_b64 = await bot._baixar_imagem(media_id)
+                await bot.handle_incoming(
+                    from_number,
+                    texto_caption or "O que tem nessa imagem?",
+                    imagem_b64=imagem_b64,
+                )
+
             elif msg_type == "interactive":
-                from_number = msg["from"]
-                text = msg.get("interactive", {}).get("button_reply", {}).get("title", "")
-                if not text:
-                    text = msg.get("interactive", {}).get("list_reply", {}).get("title", "")
-                logger.info("Mensagem interativa de %s: %s", from_number, text)
-                await bot.handle_incoming(from_number, text)
+                texto = (msg.get("interactive", {}).get("button_reply", {}).get("title")
+                         or msg.get("interactive", {}).get("list_reply", {}).get("title")
+                         or "")
+                await bot.handle_incoming(from_number, texto)
+
             else:
                 logger.info("Tipo nao tratado: %s", msg_type)
 
@@ -95,25 +102,13 @@ async def webhook(request: Request):
 
 def main() -> None:
     if not WHATSAPP_ACCESS_TOKEN:
-        logger.error(
-            "WHATSAPP_ACCESS_TOKEN nao configurado!\n"
-            "1. Copie .env.example para .env\n"
-            "2. Preencha suas credenciais\n"
-            "3. Execute novamente."
-        )
+        logger.error("WHATSAPP_ACCESS_TOKEN nao configurado!")
         sys.exit(1)
-
     if not WHATSAPP_PHONE_NUMBER_ID:
-        logger.error(
-            "WHATSAPP_PHONE_NUMBER_ID nao configurado!\n"
-            "Preencha no .env com o ID do numero de telefone do WhatsApp."
-        )
+        logger.error("WHATSAPP_PHONE_NUMBER_ID nao configurado!")
         sys.exit(1)
 
-    logger.info(
-        "Iniciando EditalBot WhatsApp em %s:%s",
-        WEBHOOK_HOST, WEBHOOK_PORT,
-    )
+    logger.info("Iniciando EditalBot Gemini WhatsApp em %s:%s", WEBHOOK_HOST, WEBHOOK_PORT)
     uvicorn.run(app, host=WEBHOOK_HOST, port=WEBHOOK_PORT)
 
 
